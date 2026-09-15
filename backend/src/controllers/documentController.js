@@ -1,4 +1,26 @@
 const documentService = require('../services/documentService');
+const fs = require('node:fs');
+
+function removeUploadedFile(file) {
+  if (file?.path && fs.existsSync(file.path)) {
+    fs.unlinkSync(file.path);
+  }
+}
+
+function getErrorStatusCode(error) {
+  if (error.code === documentService.documentErrorCodes.validation) {
+    return 400;
+  }
+
+  if (
+    error.code === documentService.documentErrorCodes.fileNotFound
+    || error.code === documentService.documentErrorCodes.unsafeStoragePath
+  ) {
+    return 404;
+  }
+
+  return 500;
+}
 
 function uploadDocument(req, res) {
   try {
@@ -9,8 +31,8 @@ function uploadDocument(req, res) {
 
     return res.status(201).json(document);
   } catch (error) {
-    const statusCode = error.message === 'Arquivo obrigatório.' || error.message === 'Identificação do proprietário é obrigatória.' ? 400 : 500;
-    return res.status(statusCode).json({ message: error.message });
+    removeUploadedFile(req.file);
+    return res.status(getErrorStatusCode(error)).json({ message: error.message });
   }
 }
 
@@ -33,11 +55,7 @@ function downloadDocument(req, res) {
 
     return res.download(document.storagePath, document.originalName);
   } catch (error) {
-    if (error.message === 'Arquivo não encontrado no armazenamento local.') {
-      return res.status(404).json({ message: error.message });
-    }
-
-    return res.status(500).json({ message: error.message });
+    return res.status(getErrorStatusCode(error)).json({ message: error.message });
   }
 }
 

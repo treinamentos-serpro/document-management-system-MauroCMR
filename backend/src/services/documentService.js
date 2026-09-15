@@ -1,34 +1,82 @@
 const fs = require('node:fs');
+const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const documentRepository = require('../repositories/documentRepository');
 
-function uploadDocument({ file, owner }) {
+const storageDir = path.resolve(__dirname, '..', '..', 'storage');
+const DEFAULT_MIME_TYPE = 'application/octet-stream';
+
+const documentErrorCodes = {
+  validation: 'DOCUMENT_VALIDATION_ERROR',
+  fileNotFound: 'DOCUMENT_FILE_NOT_FOUND',
+  unsafeStoragePath: 'DOCUMENT_UNSAFE_STORAGE_PATH',
+};
+
+function createDocumentError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function validateUploadInput({ file, owner }) {
   if (!file) {
-    throw new Error('Arquivo obrigatório.');
+    throw createDocumentError('Arquivo obrigatório.', documentErrorCodes.validation);
   }
 
-  if (!owner) {
-    throw new Error('Identificação do proprietário é obrigatória.');
+  if (!owner || !owner.trim()) {
+    throw createDocumentError('Identificação do proprietário é obrigatória.', documentErrorCodes.validation);
   }
+}
 
-  const document = {
+function createDocumentMetadata({ file, owner }) {
+  return {
     id: randomUUID(),
     originalName: file.originalname,
     storedName: file.filename,
     size: file.size,
     uploadedAt: new Date().toISOString(),
-    owner,
-    mimeType: file.mimetype || 'application/octet-stream',
+    owner: owner.trim(),
+    mimeType: file.mimetype || DEFAULT_MIME_TYPE,
     storagePath: file.path,
   };
+}
 
-  documentRepository.create(document);
+function toPublicDocument(document) {
+  return {
+    id: document.id,
+    originalName: document.originalName,
+    storedName: document.storedName,
+    size: document.size,
+    uploadedAt: document.uploadedAt,
+    owner: document.owner,
+    mimeType: document.mimeType,
+  };
+}
 
-  return document;
+function isPathInsideStorage(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  return resolvedPath === storageDir || resolvedPath.startsWith(`${storageDir}${path.sep}`);
+}
+
+function ensureDocumentCanBeDownloaded(document) {
+  if (!isPathInsideStorage(document.storagePath)) {
+    throw createDocumentError('Caminho do arquivo inválido.', documentErrorCodes.unsafeStoragePath);
+  }
+
+  if (!fs.existsSync(document.storagePath)) {
+    throw createDocumentError('Arquivo não encontrado no armazenamento local.', documentErrorCodes.fileNotFound);
+  }
+}
+
+function uploadDocument({ file, owner }) {
+  validateUploadInput({ file, owner });
+
+  const document = createDocumentMetadata({ file, owner });
+  return toPublicDocument(documentRepository.create(document));
 }
 
 function listDocuments() {
-  return documentRepository.list();
+  return documentRepository.list().map(toPublicDocument);
 }
 
 function getDocumentForDownload(id) {
@@ -38,14 +86,13 @@ function getDocumentForDownload(id) {
     return null;
   }
 
-  if (!fs.existsSync(document.storagePath)) {
-    throw new Error('Arquivo não encontrado no armazenamento local.');
-  }
+  ensureDocumentCanBeDownloaded(document);
 
   return document;
 }
 
 module.exports = {
+  documentErrorCodes,
   uploadDocument,
   listDocuments,
   getDocumentForDownload,

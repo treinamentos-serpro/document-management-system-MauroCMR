@@ -37,5 +37,5 @@ export async function listDocuments() {
 }
 
 export function getDownloadUrl(documentId) {
-  return `${API_BASE_URL}/documents/${documentId}/download`;
+  return `${API_BASE_URL}/documents/${encodeURIComponent(documentId)}/download`;
 }
